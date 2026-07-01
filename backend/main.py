@@ -65,9 +65,17 @@ class SummarizeRequest(BaseModel):
     prompt: str | None = None
 
 
+class TokenUsage(BaseModel):
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
 class SummarizeResponse(BaseModel):
     url: str
     summary: str
+    # Token usage for the underlying LLM call, when the engine reports it.
+    usage: TokenUsage | None = None
 
 
 def seed_agent_options(session: Session) -> None:
@@ -262,7 +270,16 @@ async def summarize(request: SummarizeRequest, session: SessionDep):
 
     if not summary:
         raise HTTPException(status_code=502, detail="Agent returned no summary")
-    return SummarizeResponse(url=request.url, summary=summary)
+    token_usage = (
+        TokenUsage(
+            input_tokens=usage.prompt_token_count or 0,
+            output_tokens=usage.candidates_token_count or 0,
+            total_tokens=usage.total_token_count or 0,
+        )
+        if usage
+        else None
+    )
+    return SummarizeResponse(url=request.url, summary=summary, usage=token_usage)
 
 
 @app.post("/summarize/openai", response_model=SummarizeResponse)
@@ -275,7 +292,7 @@ async def summarize_openai(request: SummarizeRequest, session: SessionDep):
     guidance, length = resolve_guidance_and_length(request, session)
 
     try:
-        summary = await run_in_threadpool(
+        summary, usage = await run_in_threadpool(
             summarize_with_search,
             request.url,
             style_guidance=guidance,
@@ -287,7 +304,16 @@ async def summarize_openai(request: SummarizeRequest, session: SessionDep):
 
     if not summary:
         raise HTTPException(status_code=502, detail="Agent returned no summary")
-    return SummarizeResponse(url=request.url, summary=summary)
+    if usage:
+        logger.info(
+            "tokens url=%s input=%s output=%s total=%s",
+            request.url,
+            usage["input_tokens"],
+            usage["output_tokens"],
+            usage["total_tokens"],
+        )
+    token_usage = TokenUsage(**usage) if usage else None
+    return SummarizeResponse(url=request.url, summary=summary, usage=token_usage)
 
 
 @app.get("/articles", response_model=list[Article])

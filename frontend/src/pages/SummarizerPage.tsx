@@ -18,12 +18,15 @@ import Markdown from 'react-markdown'
 import {
   fetchAgentOptions,
   fetchRandomWiki,
+  fetchWikiByTitles,
+  parseTopicList,
   saveArticle,
   slugify,
   summarize,
 } from '@/api'
 import { useAppStore } from '@/store'
 import type { QueueItem } from '@/store'
+import { TokenUsageBadge } from '@/components/TokenUsageBadge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -50,6 +53,7 @@ const CONCURRENCY = 3
 
 export function SummarizerPage() {
   const [fetchCount, setFetchCount] = useState(3)
+  const [topicText, setTopicText] = useState('')
 
   const queue = useAppStore((s) => s.queue)
   const queueRunning = useAppStore((s) => s.queueRunning)
@@ -95,6 +99,30 @@ export function SummarizerPage() {
       addToQueue(entries)
     },
   })
+
+  const addByTitleMutation = useMutation({
+    mutationFn: (titles: string[]) => fetchWikiByTitles(titles),
+    onSuccess: ({ entries, missing }) => {
+      if (entries.length > 0) {
+        recordFetch(entries)
+        addToQueue(entries)
+      }
+      if (missing.length > 0) {
+        toast.error(`Not found on Wikipedia: ${missing.join(', ')}`)
+      }
+      setTopicText('')
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  })
+
+  function handleAddTopics() {
+    const parsed = parseTopicList(topicText)
+    if (parsed.length === 0) {
+      toast.error('No topics found in the input.')
+      return
+    }
+    addByTitleMutation.mutate(parsed)
+  }
 
   function handleRerun() {
     if (queueRunning) return
@@ -145,7 +173,11 @@ export function SummarizerPage() {
             controller.signal,
           )
           if (!controller.signal.aborted) {
-            updateQueueItem(next.id, { status: 'done', summary: result })
+            updateQueueItem(next.id, {
+              status: 'done',
+              summary: result.summary,
+              usage: result.usage,
+            })
           }
         } catch (e) {
           if (controller.signal.aborted) {
@@ -274,11 +306,24 @@ export function SummarizerPage() {
         <CardHeader>
           <CardTitle>Add entries</CardTitle>
           <CardDescription>
-            Fetch random Wikipedia articles and add them to the queue.
+            Paste topics, one per line, or add random ones.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-3">
+        <CardContent className="flex flex-col gap-3">
+          <Textarea
+            placeholder={'Black hole\nPhotosynthesis\nMars, planet'}
+            value={topicText}
+            onChange={(e) => setTopicText(e.target.value)}
+            rows={4}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleAddTopics}
+              disabled={!topicText.trim() || addByTitleMutation.isPending}
+            >
+              <Plus />
+              {addByTitleMutation.isPending ? 'Looking up…' : 'Add topics'}
+            </Button>
             <Input
               type="number"
               min={1}
@@ -292,6 +337,7 @@ export function SummarizerPage() {
               className="w-20"
             />
             <Button
+              variant="secondary"
               onClick={() => addMutation.mutate()}
               disabled={addMutation.isPending}
             >
@@ -488,6 +534,9 @@ function QueueItemRow({
         <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none rounded-md bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary">
           <Markdown>{item.summary}</Markdown>
         </div>
+      )}
+      {item.status === 'done' && item.usage && (
+        <TokenUsageBadge usage={item.usage} />
       )}
       {item.status === 'error' && item.error && (
         <p className="text-xs text-destructive">{item.error}</p>

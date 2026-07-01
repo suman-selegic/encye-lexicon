@@ -1,6 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import {
   BookOpen,
+  Layers,
   Library as LibraryIcon,
   Settings,
   Sparkles,
@@ -18,6 +19,7 @@ import {
 
 const NAV = [
   { title: 'Summarizer', to: '/', icon: Sparkles },
+  { title: 'Batch Summarizer', to: '/batch', icon: Layers },
   { title: 'Library', to: '/library', icon: LibraryIcon },
   { title: 'Settings', to: '/settings', icon: Settings },
 ] as const

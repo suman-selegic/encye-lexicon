@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { SummarizeEngine, WikiEntry } from './api'
+import type { SummarizeEngine, TokenUsage, WikiEntry } from './api'
 
 export type QueueItemStatus = 'pending' | 'running' | 'done' | 'error'
 
@@ -9,6 +9,7 @@ export type QueueItem = {
   entry: WikiEntry
   status: QueueItemStatus
   summary?: string
+  usage?: TokenUsage
   error?: string
 }
 
@@ -30,6 +31,10 @@ type AppState = {
   engine: SummarizeEngine
   useCustomPrompt: boolean
   customPrompt: string
+  batchStyle: string
+  batchLength: number
+  batchUseCustomPrompt: boolean
+  batchCustomPrompt: string
   fetchHistory: FetchBatch[]
   addToQueue: (entries: WikiEntry[]) => void
   recordFetch: (entries: WikiEntry[]) => void
@@ -39,7 +44,7 @@ type AppState = {
   resetQueue: () => void
   updateQueueItem: (
     id: string,
-    patch: Partial<Pick<QueueItem, 'status' | 'summary' | 'error'>>,
+    patch: Partial<Pick<QueueItem, 'status' | 'summary' | 'usage' | 'error'>>,
   ) => void
   setQueueRunning: (v: boolean) => void
   setStyle: (style: string) => void
@@ -47,6 +52,10 @@ type AppState = {
   setEngine: (engine: SummarizeEngine) => void
   setUseCustomPrompt: (v: boolean) => void
   setCustomPrompt: (prompt: string) => void
+  setBatchStyle: (style: string) => void
+  setBatchLength: (length: number) => void
+  setBatchUseCustomPrompt: (v: boolean) => void
+  setBatchCustomPrompt: (prompt: string) => void
 }
 
 let _nextId = 1
@@ -61,6 +70,10 @@ export const useAppStore = create<AppState>()(
       engine: 'openai',
       useCustomPrompt: false,
       customPrompt: '',
+      batchStyle: '',
+      batchLength: 200,
+      batchUseCustomPrompt: false,
+      batchCustomPrompt: '',
       fetchHistory: [],
       addToQueue: (entries) =>
         set((s) => ({
@@ -96,6 +109,7 @@ export const useAppStore = create<AppState>()(
             ...item,
             status: 'pending' as const,
             summary: undefined,
+            usage: undefined,
             error: undefined,
           })),
         })),
@@ -111,6 +125,11 @@ export const useAppStore = create<AppState>()(
       setEngine: (engine) => set({ engine }),
       setUseCustomPrompt: (useCustomPrompt) => set({ useCustomPrompt }),
       setCustomPrompt: (customPrompt) => set({ customPrompt }),
+      setBatchStyle: (batchStyle) => set({ batchStyle }),
+      setBatchLength: (batchLength) => set({ batchLength }),
+      setBatchUseCustomPrompt: (batchUseCustomPrompt) =>
+        set({ batchUseCustomPrompt }),
+      setBatchCustomPrompt: (batchCustomPrompt) => set({ batchCustomPrompt }),
     }),
     {
       name: 'encye-lexicon-store',
@@ -121,6 +140,10 @@ export const useAppStore = create<AppState>()(
         length: state.length,
         engine: state.engine,
         fetchHistory: state.fetchHistory,
+        batchStyle: state.batchStyle,
+        batchLength: state.batchLength,
+        batchUseCustomPrompt: state.batchUseCustomPrompt,
+        batchCustomPrompt: state.batchCustomPrompt,
       }),
     },
   ),

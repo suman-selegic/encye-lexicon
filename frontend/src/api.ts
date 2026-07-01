@@ -22,6 +22,20 @@ type WikiApiPage = {
   extract?: string
   fullurl?: string
   thumbnail?: { source?: string }
+  missing?: boolean
+}
+
+/**
+ * Parse pasted/uploaded topic text into a list: one topic per non-blank row,
+ * taking the first comma-separated column and stripping surrounding
+ * quotes/whitespace. Also used for CSV input, since a bare topic list is a
+ * (degenerate) single-column CSV.
+ */
+export function parseTopicList(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.split(',')[0]?.trim().replace(/^"|"$/g, '').trim() ?? '')
+    .filter(Boolean)
 }
 
 /**
@@ -60,11 +74,71 @@ export async function fetchRandomWiki(count = 1): Promise<WikiEntry[]> {
   }))
 }
 
+/** Result of looking up specific titles: found entries plus any that don't exist. */
+export type WikiLookupResult = {
+  entries: WikiEntry[]
+  missing: string[]
+}
+
+/**
+ * Look up specific Wikipedia articles by title (following redirects), for
+ * manually-entered topics rather than random ones. Titles that don't resolve
+ * to a real article are reported back separately instead of being queued.
+ */
+export async function fetchWikiByTitles(
+  titles: string[],
+): Promise<WikiLookupResult> {
+  const params = new URLSearchParams({
+    action: 'query',
+    format: 'json',
+    formatversion: '2',
+    titles: titles.join('|'),
+    redirects: '1',
+    prop: 'extracts|pageimages|info',
+    inprop: 'url',
+    exintro: '1',
+    explaintext: '1',
+    exlimit: 'max',
+    piprop: 'thumbnail',
+    pithumbsize: '320',
+    origin: '*', // anonymous CORS
+  })
+  const res = await fetch(`https://en.wikipedia.org/w/api.php?${params}`, {
+    headers: { accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`Wikipedia request failed (${res.status})`)
+  const data = await res.json()
+  const pages: WikiApiPage[] = data?.query?.pages ?? []
+  const entries = pages
+    .filter((page) => !page.missing)
+    .map((page) => ({
+      title: page.title,
+      extract: page.extract ?? '',
+      url: page.fullurl ?? wikiUrlFromTitle(page.title),
+      thumbnail: page.thumbnail?.source,
+    }))
+  const missing = pages.filter((page) => page.missing).map((page) => page.title)
+  return { entries, missing }
+}
+
 export type SummarizeOptions = {
   style?: string
   length?: number
   /** A custom instruction used in place of the style preset when set. */
   prompt?: string
+}
+
+/** Token counts for the underlying LLM call, when the engine reports them. */
+export type TokenUsage = {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+}
+
+/** A summary plus the token usage of the call that produced it. */
+export type SummarizeResult = {
+  summary: string
+  usage?: TokenUsage
 }
 
 /**
@@ -85,7 +159,7 @@ export async function summarize(
   options: SummarizeOptions = {},
   engine: SummarizeEngine = 'adk',
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<SummarizeResult> {
   const res = await fetch(SUMMARIZE_PATHS[engine], {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -99,7 +173,66 @@ export async function summarize(
   })
   if (!res.ok) throw new Error(`Summarize failed (${res.status})`)
   const data = await res.json()
-  return data.summary as string
+  return {
+    summary: data.summary as string,
+    usage: (data.usage as TokenUsage | null) ?? undefined,
+  }
+}
+
+/**
+ * Delimiter the model is told to emit between summaries in batch mode, used to
+ * split the single concatenated response back into per-topic summaries.
+ */
+export const BATCH_DELIMITER = '<<<END_SUMMARY>>>'
+
+export type BatchSummary = { topic: string; summary: string }
+
+/** The per-topic summaries plus the token usage of the one batched call. */
+export type BatchResult = {
+  summaries: BatchSummary[]
+  usage?: TokenUsage
+}
+
+/**
+ * Summarize a queue of topics in a SINGLE OpenAI call. The topics ride in the
+ * `url` field (passed through verbatim to the prompt's `Topic:` block) and the
+ * delimiter/ordering rules ride in `prompt`; the concatenated response is then
+ * split on {@link BATCH_DELIMITER} into one summary per topic, in order.
+ *
+ * Reuses the existing `/summarize/openai` route — no batch-specific backend.
+ * The returned `usage` covers the whole batch (it was one LLM call).
+ */
+export async function batchSummarize(
+  topics: string[],
+  options: { length?: number; style?: string; prompt?: string } = {},
+  signal?: AbortSignal,
+): Promise<BatchResult> {
+  const delimiterRule = [
+    `After each topic's summary, output this exact delimiter on its own line: ${BATCH_DELIMITER}`,
+    'Do not output the delimiter anywhere else. Produce exactly one summary per topic, in the order listed.',
+  ].join(' ')
+  // A custom prompt (when set) replaces the style, same as single-item
+  // summarize — but the delimiter rule must always ride along so the batch
+  // response can still be split back into per-topic summaries.
+  const instruction = options.prompt
+    ? `${options.prompt}\n\n${delimiterRule}`
+    : delimiterRule
+  const { summary: raw, usage } = await summarize(
+    topics.join('\n'),
+    {
+      prompt: instruction,
+      length: options.length,
+      style: options.prompt ? undefined : options.style,
+    },
+    'openai',
+    signal,
+  )
+  const parts = raw
+    .split(BATCH_DELIMITER)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const summaries = topics.map((topic, i) => ({ topic, summary: parts[i] ?? '' }))
+  return { summaries, usage }
 }
 
 export type AgentOptions = {

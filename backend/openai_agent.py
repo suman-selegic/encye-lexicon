@@ -9,14 +9,19 @@ from agent import DEFAULT_LENGTH, DEFAULT_STYLE, STYLES
 # `web_search` tool (e.g. gpt-5.5, gpt-4.1, gpt-4.1-mini).
 OPENAI_MODEL = os.getenv("OPENAI_SUMMARIZE_MODEL", "gpt-5.4-mini")
 
-# The model researches the topic with its native web search tool; we don't
+# The model researches each topic with its native web search tool; we don't
 # fetch any pages ourselves. Only style and length guidance are customizable.
+# The rules are phrased to handle one OR many topics so the same route can back
+# both the single-topic and batch summarizers — the batch caller supplies the
+# delimiter/formatting instructions via the style guidance.
 _FIXED_RULES = (
-    "Write a summary of the following topic. Use the web search tool to "
-    "research it and gather accurate, up-to-date information.\n"
+    "Write a summary for each topic provided. Use the web search tool to "
+    "research each one and gather accurate, up-to-date information.\n"
     "Rules:\n"
-    "- Base the summary on what reliable sources say; do not invent facts.\n"
-    "- If the topic cannot be found, say so."
+    "- Base each summary on what reliable sources say; do not invent facts.\n"
+    "- If a topic cannot be found, say so.\n"
+    "- When multiple topics are given, summarize each one separately and "
+    "follow any formatting or delimiter instructions provided below."
 )
 
 _client: OpenAI | None = None
@@ -66,7 +71,7 @@ def summarize_with_search(
     url: str,
     style_guidance: str | None = None,
     length: int | None = None,
-) -> str:
+) -> tuple[str, dict[str, int] | None]:
     """Summarize a Wikipedia URL's topic using OpenAI's native web search.
 
     The topic is parsed from the URL; the model gathers information via its
@@ -78,7 +83,9 @@ def summarize_with_search(
         length: Target summary length in words.
 
     Returns:
-        The summary text produced by the model.
+        A `(summary, usage)` tuple. `usage` reports the call's token counts as
+        ``{"input_tokens", "output_tokens", "total_tokens"}``, or None if the
+        API did not return usage data.
     """
     topic = topic_from_wiki_url(url)
     instruction = _build_instruction(topic, style_guidance, length)
@@ -87,4 +94,11 @@ def summarize_with_search(
         tools=[{"type": "web_search"}],
         input=instruction,
     )
-    return response.output_text
+    usage = None
+    if response.usage is not None:
+        usage = {
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+    return response.output_text, usage
