@@ -127,6 +127,16 @@ export function Library() {
     })
   }
 
+  function removeFromCompare(id: number) {
+    setCompareSet((prev) => {
+      const next = new Map(prev)
+      next.delete(id)
+      // Fewer than 2 left means there's nothing left to compare.
+      if (next.size < 2) setCompareOpen(false)
+      return next
+    })
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -293,6 +303,7 @@ export function Library() {
         articles={[...compareSet.values()]}
         open={compareOpen}
         onOpenChange={setCompareOpen}
+        onRemove={removeFromCompare}
       />
     </Card>
   )

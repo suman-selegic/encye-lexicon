@@ -1,6 +1,8 @@
+import { X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { Article } from '@/api'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -13,9 +15,10 @@ type Props = {
   articles: Article[]
   open: boolean
   onOpenChange: (open: boolean) => void
+  onRemove: (id: number) => void
 }
 
-export function CompareDialog({ articles, open, onOpenChange }: Props) {
+export function CompareDialog({ articles, open, onOpenChange, onRemove }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[95vw] sm:max-w-[95vw]">
@@ -41,6 +44,15 @@ export function CompareDialog({ articles, open, onOpenChange }: Props) {
                 >
                   {a.published ? 'Published' : 'Draft'}
                 </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6 shrink-0"
+                  onClick={() => onRemove(a.id)}
+                >
+                  <X className="size-3.5" />
+                  <span className="sr-only">Remove from comparison</span>
+                </Button>
               </div>
               <time className="text-xs text-muted-foreground/70">
                 {new Date(a.created_at).toLocaleDateString()}
