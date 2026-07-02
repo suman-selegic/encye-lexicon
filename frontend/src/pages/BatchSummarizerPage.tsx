@@ -7,6 +7,7 @@ import {
   batchSummarize,
   fetchAgentOptions,
   fetchRandomWiki,
+  fetchStyles,
   parseTopicList,
   saveArticle,
   slugify,
@@ -42,6 +43,7 @@ export function BatchSummarizerPage() {
   const [topics, setTopics] = useState<string[]>([])
   const [results, setResults] = useState<BatchSummary[]>([])
   const [usage, setUsage] = useState<TokenUsage | undefined>()
+  const [promptUsed, setPromptUsed] = useState<string | undefined>()
   const [fetchCount, setFetchCount] = useState(5)
   const [csvText, setCsvText] = useState('')
   const style = useAppStore((s) => s.batchStyle)
@@ -56,6 +58,10 @@ export function BatchSummarizerPage() {
   const optionsQuery = useQuery({
     queryKey: ['agentOptions'],
     queryFn: fetchAgentOptions,
+  })
+  const stylesQuery = useQuery({
+    queryKey: ['styles'],
+    queryFn: fetchStyles,
   })
 
   useEffect(() => {
@@ -108,6 +114,14 @@ export function BatchSummarizerPage() {
     onSuccess: (res) => {
       setResults(res.summaries)
       setUsage(res.usage)
+      // Record the instruction that actually produced these summaries: the
+      // custom prompt when it was used, otherwise the selected style's
+      // guidance text (falls back to the style value if it hasn't loaded).
+      setPromptUsed(
+        useCustomPrompt && customPrompt.trim()
+          ? customPrompt.trim()
+          : (stylesQuery.data?.find((s) => s.value === style)?.guidance ?? style),
+      )
     },
     onError: (e) => toast.error(errMsg(e)),
   })
@@ -310,7 +324,7 @@ export function BatchSummarizerPage() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {results.map((r, i) => (
-                <ResultRow key={`${r.topic}-${i}`} result={r} />
+                <ResultRow key={`${r.topic}-${i}`} result={r} prompt={promptUsed} />
               ))}
             </CardContent>
           </Card>
@@ -320,7 +334,13 @@ export function BatchSummarizerPage() {
   )
 }
 
-function ResultRow({ result }: { result: BatchSummary }) {
+function ResultRow({
+  result,
+  prompt,
+}: {
+  result: BatchSummary
+  prompt?: string
+}) {
   const queryClient = useQueryClient()
 
   const saveMutation = useMutation({
@@ -329,6 +349,7 @@ function ResultRow({ result }: { result: BatchSummary }) {
         title: result.topic,
         slug: slugify(result.topic),
         content: result.summary,
+        prompt,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['articles'] })

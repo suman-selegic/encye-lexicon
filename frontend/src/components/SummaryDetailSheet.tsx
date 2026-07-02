@@ -115,6 +115,17 @@ export function SummaryDetailSheet({ article, open, onOpenChange }: Props) {
                   onChange={(e) => setContent(e.target.value)}
                 />
               </div>
+              {article.prompt && (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="detail-prompt">Prompt used</Label>
+                  <Textarea
+                    id="detail-prompt"
+                    className="min-h-20"
+                    value={article.prompt}
+                    readOnly
+                  />
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
                 Saved {new Date(article.created_at).toLocaleString()}
               </p>

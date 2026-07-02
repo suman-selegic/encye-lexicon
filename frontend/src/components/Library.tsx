@@ -38,8 +38,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { CompareDialog } from '@/components/CompareDialog'
 import { SummaryDetailSheet } from '@/components/SummaryDetailSheet'
 
 const PAGE_SIZE = 10
@@ -54,6 +56,8 @@ export function Library() {
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Article | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [compareSet, setCompareSet] = useState<Map<number, Article>>(new Map())
+  const [compareOpen, setCompareOpen] = useState(false)
 
   // Debounce the search box; reset to the first page on any query change.
   useEffect(() => {
@@ -111,6 +115,18 @@ export function Library() {
     setSheetOpen(true)
   }
 
+  function toggleCompare(a: Article) {
+    setCompareSet((prev) => {
+      const next = new Map(prev)
+      if (next.has(a.id)) {
+        next.delete(a.id)
+      } else {
+        next.set(a.id, a)
+      }
+      return next
+    })
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -137,6 +153,30 @@ export function Library() {
           </Tabs>
         </div>
 
+        {compareSet.size > 0 && (
+          <div className="flex items-center justify-between rounded-lg border bg-muted/50 px-3 py-2">
+            <span className="text-sm text-muted-foreground">
+              {compareSet.size} selected
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={compareSet.size < 2}
+                onClick={() => setCompareOpen(true)}
+              >
+                Compare
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setCompareSet(new Map())}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
+
         {articlesQuery.isLoading ? (
           <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
         ) : rows.length === 0 ? (
@@ -156,6 +196,16 @@ export function Library() {
                 className="flex cursor-pointer items-start gap-3 p-4 transition-colors hover:bg-muted/50"
                 onClick={() => openDetail(a)}
               >
+                <div
+                  className="flex shrink-0 items-center pt-0.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Checkbox
+                    checked={compareSet.has(a.id)}
+                    onCheckedChange={() => toggleCompare(a)}
+                    aria-label={`Select "${a.title}" to compare`}
+                  />
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">{a.title}</span>
@@ -238,6 +288,11 @@ export function Library() {
         article={selected}
         open={sheetOpen}
         onOpenChange={setSheetOpen}
+      />
+      <CompareDialog
+        articles={[...compareSet.values()]}
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
       />
     </Card>
   )

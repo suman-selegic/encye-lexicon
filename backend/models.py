@@ -12,6 +12,9 @@ class ArticleBase(SQLModel):
     slug: str = Field(index=True, unique=True)
     content: str
     published: bool = Field(default=False)
+    # The instruction (custom prompt or resolved style guidance) that produced
+    # `content`, kept for reference alongside the saved summary.
+    prompt: str | None = Field(default=None)
 
 
 class Article(ArticleBase, table=True):
@@ -29,6 +32,7 @@ class ArticleUpdate(SQLModel):
     slug: str | None = None
     content: str | None = None
     published: bool | None = None
+    prompt: str | None = None
 
 
 class StylePresetBase(SQLModel):
@@ -66,3 +70,10 @@ engine = create_engine(sqlite_url, echo=True)
 
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
+    # `create_all` only creates missing tables, not missing columns on
+    # existing ones — patch older sqlite files that predate `Article.prompt`.
+    with engine.connect() as conn:
+        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(article)")}
+        if "prompt" not in columns:
+            conn.exec_driver_sql("ALTER TABLE article ADD COLUMN prompt TEXT")
+            conn.commit()

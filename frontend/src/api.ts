@@ -6,6 +6,8 @@ export type Article = {
   slug: string
   content: string
   published: boolean
+  /** The instruction (custom prompt or resolved style guidance) used to generate `content`, if known. */
+  prompt: string | null
   created_at: string
   updated_at: string
 }
@@ -319,6 +321,7 @@ export async function saveArticle(input: {
   title: string
   slug: string
   content: string
+  prompt?: string
 }): Promise<Article> {
   const res = await fetch('/api/articles', {
     method: 'POST',
@@ -349,7 +352,7 @@ export async function listArticles(params: ListParams = {}): Promise<Article[]> 
 }
 
 export type ArticleUpdate = Partial<
-  Pick<Article, 'title' | 'content' | 'published'>
+  Pick<Article, 'title' | 'content' | 'published' | 'prompt'>
 >
 
 /** Patch an article's editable fields. */
