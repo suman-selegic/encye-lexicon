@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Play, Plus, Save, Trash2, X } from 'lucide-react'
+import { Loader2, Play, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import Markdown from 'react-markdown'
 import {
@@ -105,15 +105,28 @@ export function BatchSummarizerPage() {
 
 
   const runMutation = useMutation({
-    mutationFn: () =>
-      batchSummarize(topics, {
+    mutationFn: ({ list }: { list: string[]; mode: 'run' | 'retry' }) =>
+      batchSummarize(list, {
         style,
         length,
         prompt: useCustomPrompt && customPrompt.trim() ? customPrompt : undefined,
       }),
-    onSuccess: (res) => {
-      setResults(res.summaries)
-      setUsage(res.usage)
+    onSuccess: (res, { mode }) => {
+      if (mode === 'run') {
+        setResults(res.summaries)
+        setUsage(res.usage)
+      } else {
+        // Retry: fill in only the re-run topics that now have a summary,
+        // keeping every other row (and its order) untouched.
+        const retried = new Map(res.summaries.map((s) => [s.topic, s.summary]))
+        setResults((prev) =>
+          prev.map((r) => {
+            const summary = retried.get(r.topic)
+            return summary ? { ...r, summary } : r
+          }),
+        )
+        setUsage((prev) => addUsage(prev, res.usage))
+      }
       // Record the instruction that actually produced these summaries: the
       // custom prompt when it was used, otherwise the selected style's
       // guidance text (falls back to the style value if it hasn't loaded).
@@ -122,9 +135,21 @@ export function BatchSummarizerPage() {
           ? customPrompt.trim()
           : (stylesQuery.data?.find((s) => s.value === style)?.guidance ?? style),
       )
+      const failed = res.summaries.filter((s) => !s.summary.trim()).length
+      if (failed > 0) {
+        toast.warning(
+          `${failed} topic${failed === 1 ? '' : 's'} came back without a summary — use "Retry failed" to run just those again.`,
+        )
+      }
     },
     onError: (e) => toast.error(errMsg(e)),
   })
+
+  // Topics whose row is still empty — the batch response was cut short (or the
+  // whole call failed on a retry). These are what "Retry failed" re-runs.
+  const failedTopics = results
+    .filter((r) => !r.summary.trim())
+    .map((r) => r.topic)
 
   return (
     <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 lg:grid-cols-[24rem_minmax(0,1fr)] lg:items-start">
@@ -262,7 +287,7 @@ export function BatchSummarizerPage() {
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  onClick={() => runMutation.mutate()}
+                  onClick={() => runMutation.mutate({ list: topics, mode: 'run' })}
                   disabled={topics.length === 0 || runMutation.isPending}
                 >
                   {runMutation.isPending ? (
@@ -317,9 +342,32 @@ export function BatchSummarizerPage() {
                   <CardDescription>
                     {results.length} summar{results.length === 1 ? 'y' : 'ies'}{' '}
                     split from one response.
+                    {failedTopics.length > 0 &&
+                      ` ${failedTopics.length} missing a summary.`}
                   </CardDescription>
                 </div>
-                {usage && <TokenUsageBadge usage={usage} label="tokens total" />}
+                <div className="flex items-center gap-2">
+                  {failedTopics.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        runMutation.mutate({ list: failedTopics, mode: 'retry' })
+                      }
+                      disabled={runMutation.isPending}
+                    >
+                      {runMutation.isPending ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="size-3.5" />
+                      )}
+                      Retry {failedTopics.length} failed
+                    </Button>
+                  )}
+                  {usage && (
+                    <TokenUsageBadge usage={usage} label="tokens total" />
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -391,4 +439,15 @@ function ResultRow({
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
+}
+
+/** Sum token usage across the initial batch call and any retry calls. */
+function addUsage(a?: TokenUsage, b?: TokenUsage): TokenUsage | undefined {
+  if (!a) return b
+  if (!b) return a
+  return {
+    input_tokens: a.input_tokens + b.input_tokens,
+    output_tokens: a.output_tokens + b.output_tokens,
+    total_tokens: a.total_tokens + b.total_tokens,
+  }
 }
